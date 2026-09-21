@@ -23,6 +23,61 @@ default_profile: dev
 # new snapshot is written.
 backup_keep: 10
 
+# New-account notification mail. Off unless enabled is true.
+#
+# This configuration points at the MailHog container from compose.yaml, which
+# captures everything and delivers nothing — inspect it at localhost:8025.
+mail:
+  enabled: true
+  host: mailhog
+  port: 1025
+  from: Directory Provisioning <noreply@example.org>
+
+  # none | starttls | tls. MailHog offers neither auth nor TLS, so none.
+  # A real relay is almost always starttls on 587 or tls on 465.
+  encryption: none
+
+  # SMTP auth is opt-in: leave username unset and no AUTH is attempted, which
+  # is what this dev profile does and what a relay that allowlists sender IPs
+  # usually wants. A password is only needed if you set a username.
+  #
+  # Setting a username requires encryption to be starttls or tls, so
+  # credentials are never sent in the clear.
+  #
+  # The password can live here directly — if so, chmod 0600 this file and keep
+  # it out of version control, since nothing else in it is secret:
+  # username: ldap-cli@corp.com
+  # password: the-smtp-password
+  #
+  # Or name an environment variable to read it from instead, which keeps the
+  # secret out of the file entirely. This wins if both are set:
+  # password_env: LDAP_CLI_SMTP_PASSWORD
+
+  # RFC 2156 Sensitivity header: personal, private or company-confidential.
+  # Leave empty to omit it. Clients that honour it will mark the message and
+  # may block forwarding — worth setting when the mail carries a password.
+  sensitivity: company-confidential
+
+  # Whether the generated password appears in the message. Turning this off
+  # sends the account details only, and the password has to be delivered some
+  # other way.
+  include_password: true
+
+  # Subject and body are text/template over the account. Available fields:
+  # .Username .FullName .Email .DN .Profile .Password
+  subject: "Your new account: {{.Username}}"
+  # body: |
+  #   Hello {{.FullName}}, your username is {{.Username}}.
+
+  # Extra headers, each "Name: value".
+  # headers:
+  #   - "X-Auto-Response-Suppress: All"
+
+  # bcc:
+  #   - it-audit@example.org
+
+  timeout: 10s
+
 profiles:
   # A production server: TLS on the wire, verified against a private CA.
   prod:

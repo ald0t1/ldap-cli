@@ -1,8 +1,8 @@
-// Package mailer is where new-account notification email will live.
+// Package mailer sends new-account notifications.
 //
-// Delivery is deliberately unimplemented for now. The interface and the call
-// site exist so that adding a real transport later is one new type plus one
-// wiring line in the CLI, with no change to the provisioning path.
+// Two implementations satisfy Mailer: SMTP, used when mail.enabled is set in
+// the config, and Noop, which reports that delivery is switched off. The
+// provisioning path only ever sees the interface.
 package mailer
 
 import (
@@ -38,8 +38,9 @@ type Noop struct {
 
 // SendWelcome announces that no mail was sent.
 //
-// It returns nil on purpose: email is not yet wired up, and a hard error here
-// would fail a provisioning run that otherwise fully succeeded.
+// It returns nil on purpose: mail being switched off is a configuration
+// choice, not a failure, and it must not fail a provisioning run that
+// otherwise succeeded.
 func (n Noop) SendWelcome(_ context.Context, notice Notice) error {
 	if n.Out == nil {
 		return nil
@@ -48,6 +49,6 @@ func (n Noop) SendWelcome(_ context.Context, notice Notice) error {
 	if to == "" {
 		to = "(no address on the account)"
 	}
-	fmt.Fprintf(n.Out, "email: not sent to %s — delivery is not configured yet\n", to)
+	fmt.Fprintf(n.Out, "email: not sent to %s — set mail.enabled in the config to send\n", to)
 	return nil
 }

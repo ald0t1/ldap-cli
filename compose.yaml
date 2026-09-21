@@ -100,6 +100,24 @@ services:
       ldap:
         condition: service_healthy
 
+  # MailHog: catches every message instead of delivering it, so welcome mail
+  # can be inspected without sending anything to a real address.
+  #
+  #   podman compose up -d mailhog     # web UI on http://localhost:8025
+  #
+  # SMTP is on 1025 and needs no auth or TLS, which is why the dev profile
+  # sets mail.encryption to none. MailHog is archived upstream (last release
+  # 2020); it still does this job fine, and Mailpit is the maintained
+  # equivalent if you ever want a drop-in replacement.
+  mailhog:
+    image: docker.io/mailhog/mailhog:latest
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # web UI and JSON API
+    # Keep captured mail in memory; it is throwaway by definition.
+    environment:
+      MH_STORAGE: memory
+
   # Unit tests. No LDAP server needed: the directory layer is exercised
   # through a fake, which is the point of the Directory interface.
   test:
@@ -149,6 +167,8 @@ services:
     depends_on:
       ldap:
         condition: service_healthy
+      mailhog:
+        condition: service_started
 
 volumes:
   gomodcache:

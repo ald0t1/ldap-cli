@@ -4,6 +4,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -249,15 +250,23 @@ func (a *app) bindPassword(p *config.Profile) (string, error) {
 	return string(raw), nil
 }
 
-// mailerFor returns the notification mailer. Delivery is not implemented yet;
-// see internal/mailer.
+// mailerFor returns the notification mailer: SMTP when mail.enabled is set in
+// the config, otherwise a Noop that says so.
 func (a *app) mailerFor(cmd *cobra.Command) mailer.Mailer {
 	if a.mail != nil {
 		return a.mail
 	}
-	// Silence the "not configured" note in JSON mode so the output stays
-	// valid JSON.
-	var out = cmd.OutOrStdout()
+
+	// A config that failed to load is reported by whatever command needed it;
+	// here it just means mail stays off.
+	if cfg, err := a.loadConfig(); err == nil && cfg.Mail.Enabled {
+		a.mail = mailer.NewSMTP(cfg.Mail)
+		return a.mail
+	}
+
+	// Silence the "switched off" note in JSON mode so the output stays valid
+	// JSON.
+	var out io.Writer = cmd.OutOrStdout()
 	if a.jsonOut {
 		out = nil
 	}

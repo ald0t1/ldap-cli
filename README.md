@@ -67,8 +67,8 @@ Both share one implementation: the menu gathers values and calls the same
   Lookalike characters (`l I O 0 1`) are excluded.
 - **Groups are `posixGroup`** with `gidNumber` and `memberUid`. The primary
   group must already exist; it supplies the account's `gidNumber`.
-- **Email notification is not implemented yet.** The interface and call site
-  exist in `internal/mailer`; today it prints that delivery is unconfigured.
+- **Welcome email is sent over SMTP** when `mail.enabled` is set, with an
+  optional RFC 2156 `Sensitivity` header. See [Email](#email).
 
 ## Everything runs through podman compose
 
@@ -82,6 +82,7 @@ podman compose run --rm go mod tidy       # any other toolchain command
 podman compose up -d ldap                 # throwaway OpenLDAP for e2e work
 podman compose run --rm cli <args>        # the CLI, against the dev server
 podman compose up -d ldapadmin            # phpLDAPadmin UI on localhost:8080
+podman compose up -d mailhog              # mail sink on localhost:8025
 podman compose down -v                    # stop and wipe the dev directory
 ```
 
@@ -126,10 +127,11 @@ sudo install -m 0640 examples/config.yaml /etc/ldap-cli/config.yaml
 sudo vi /etc/ldap-cli/config.yaml
 ```
 
-The config holds **no passwords**, so it is not secret-critical — but it does
-map out your bind DNs and directory layout, so `0640` rather than world
-readable. Two things do need care:
+The config holds **no LDAP passwords**, so `0640` is enough to keep your bind
+DNs and directory layout from being world readable. Three things do need care:
 
+- **`mail.password`**, if you put the SMTP password in the file rather than
+  using `mail.password_env`: that makes the config a secret, so `0600` it.
 - **A bind password file**, if you use `--bind-password-file`, is the sensitive
   one: `0600`, owned by the account that runs the tool.
 - **`backup_dir`** fills with directory dumps containing password hashes. On a
@@ -224,6 +226,71 @@ cannot leave a half-provisioned user. A near miss is suggested:
 error: group "devlopers" does not exist under ou=groups,dc=example,dc=org
 (did you mean: developers?); create it first with: ldap-cli group create devlopers
 ```
+
+### Email
+
+New accounts get a welcome message when `mail.enabled` is true. Off by default,
+in which case the tool says so rather than silently skipping.
+
+`mail` is a **top-level** section, not per-profile — one SMTP setup is shared by
+every profile in the file:
+
+```yaml
+mail:
+  enabled: true
+  host: smtp.corp.com
+  port: 587
+  from: Directory Provisioning <noreply@corp.com>
+  encryption: starttls          # none | starttls | tls
+  username: ldap-cli@corp.com
+  password: the-smtp-password
+  sensitivity: company-confidential
+  include_password: true
+  subject: "Your new account: {{.Username}}"
+
+profiles:
+  prod: { ... }
+  dev:  { ... }
+```
+
+- **The SMTP password can live in the file** as `password`. If you use it,
+  `chmod 0600` the config and keep it out of version control — it is otherwise
+  the only secret in there. Alternatively `password_env: NAME` reads it from
+  the environment instead; that wins if both are set, and setting both is
+  reported as a mistake rather than silently resolved.
+- Setting `username` with `encryption: none` is a hard error, since AUTH would
+  put the password on the wire in clear. A `username` with no password source
+  at all is caught at config load, not mid-send.
+- **`sensitivity`** sets the RFC 2156 header to `Personal`, `Private` or
+  `Company-Confidential`; leave it empty to omit. Clients that honour it mark
+  the message and may block forwarding — worth setting when the mail carries a
+  password.
+- **`include_password: false`** sends the account details without the password,
+  for when you deliver credentials another way.
+- **`subject` and `body` are templates** over `.Username`, `.FullName`,
+  `.Email`, `.DN`, `.Profile` and `.Password`. Add arbitrary `headers` and
+  `bcc` recipients if you need an audit copy.
+- **A mail failure never fails a provisioning run.** The account already
+  exists by then; the error is reported as a warning.
+
+Headers are RFC 2047 encoded and the body is base64 UTF-8, so names like
+`Þóra Ærø` arrive intact rather than as mojibake. Values are also stripped of
+line breaks, so a directory attribute cannot inject extra headers.
+
+#### Trying it locally
+
+`podman compose up -d mailhog` starts [MailHog](https://github.com/mailhog/MailHog),
+which captures every message and delivers none. The `dev` profile already points
+at it. Read the results at <http://localhost:8025>, or over its API:
+
+```bash
+podman compose run --rm cli user create --given-name John --surname Doe --primary-group users
+curl -s http://localhost:8025/api/v2/messages | jq '.items[0].Content.Headers.Subject'
+```
+
+MailHog is archived upstream (last release 2020). It still does this job fine;
+[Mailpit](https://github.com/axllent/mailpit) is the maintained equivalent if
+you ever want to swap it out.
 
 ### Backups
 
@@ -330,7 +397,6 @@ fake, so `podman compose run --rm test` needs no server.
 
 ## Not done yet
 
-- **Email delivery.** `internal/mailer` defines `Mailer` and `Notice`; adding
-  SMTP is one new type plus one wiring line in `internal/cli/root.go`.
 - Group schemas other than `posixGroup`/`memberUid` (no `groupOfNames`).
 - `user delete` and `group delete`.
+- HTML mail — the welcome message is plain text only.

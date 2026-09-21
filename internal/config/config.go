@@ -13,6 +13,8 @@ import (
 	"text/template"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/aldo/ldap-cli/internal/mailer"
 )
 
 // Defaults applied when a profile leaves a field empty.
@@ -77,6 +79,10 @@ type Config struct {
 
 	// BackupKeep is how many snapshots to retain per profile.
 	BackupKeep int `yaml:"backup_keep"`
+
+	// Mail configures new-account notifications. Disabled unless
+	// mail.enabled is set.
+	Mail mailer.Config `yaml:"mail"`
 
 	// Path records where this config was read from, for error messages.
 	Path string `yaml:"-"`
@@ -195,6 +201,7 @@ func (c *Config) Validate() error {
 	if c.BackupKeep < 0 {
 		problems = append(problems, "backup_keep cannot be negative")
 	}
+	problems = append(problems, c.Mail.Validate()...)
 
 	for _, name := range c.ProfileNames() {
 		for _, prob := range c.Profiles[name].problems() {
