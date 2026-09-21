@@ -120,7 +120,13 @@ func (a *app) runUserCreate(cmd *cobra.Command, o *createOpts) error {
 	}
 
 	if o.dryRun {
+		// No snapshot: a dry run writes nothing, so there is nothing to
+		// protect and an artifact would be misleading.
 		return a.reportDryRun(cmd, client, spec, primary, extra)
+	}
+
+	if err := a.snapshot(cmd, client); err != nil {
+		return err
 	}
 
 	length := o.passwordLen
@@ -363,7 +369,7 @@ func (a *app) userRemoveGroupCmd() *cobra.Command {
 // changeMembership adds or removes a user across several groups, resolving all
 // of them first so a typo does not leave the change half applied.
 func (a *app) changeMembership(cmd *cobra.Command, uid string, names []string, add bool) error {
-	client, err := a.connect()
+	client, err := a.connectForWrite(cmd)
 	if err != nil {
 		return err
 	}
@@ -455,7 +461,7 @@ func (a *app) userPasswdCmd() *cobra.Command {
 			"The new password is printed once.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := a.connect()
+			client, err := a.connectForWrite(cmd)
 			if err != nil {
 				return err
 			}

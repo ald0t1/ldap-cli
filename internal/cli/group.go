@@ -38,7 +38,7 @@ func (a *app) groupCreateCmd() *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		Example: "  ldap-cli --profile prod group create developers --description 'Dev team'",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := a.connect()
+			client, err := a.connectForWrite(cmd)
 			if err != nil {
 				return err
 			}

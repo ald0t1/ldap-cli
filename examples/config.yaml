@@ -11,6 +11,18 @@
 
 default_profile: dev
 
+# Where pre-write snapshots go, one subdirectory per profile. Overridden by
+# --backup-dir or $LDAP_CLI_BACKUP_DIR; defaults to
+# $XDG_STATE_HOME/ldap-cli/backups when unset.
+#
+# These artifacts contain password hashes. They are written 0600 in a 0700
+# directory; keep them somewhere you would keep a directory dump.
+# backup_dir: /var/backups/ldap-cli
+
+# How many snapshots to retain per profile. Older ones are deleted after each
+# new snapshot is written.
+backup_keep: 10
+
 profiles:
   # A production server: TLS on the wire, verified against a private CA.
   prod:

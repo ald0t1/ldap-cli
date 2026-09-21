@@ -3,3 +3,9 @@
 
 # Scratch configs used when testing profiles.
 /.tmp-*.yaml
+
+# Pre-write snapshots. These contain password hashes — never commit them.
+/backups/
+
+# Bulk test data from scripts/seed.sh.
+/seed.ldif

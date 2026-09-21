@@ -143,6 +143,9 @@ services:
       # Non-interactive convenience for the throwaway dev server only. Real
       # profiles prompt for this.
       LDAP_CLI_BIND_PASSWORD: adminpassword
+      # Keep the pre-write snapshots inside the repo so they are easy to
+      # inspect; ./backups is gitignored.
+      LDAP_CLI_BACKUP_DIR: /src/backups
     depends_on:
       ldap:
         condition: service_healthy

@@ -233,6 +233,10 @@ func (a *app) shellCreateUser(cmd *cobra.Command, client *directory.Client) erro
 		return err
 	}
 
+	if err := a.snapshot(cmd, client); err != nil {
+		return err
+	}
+
 	primaryGroup, err := client.RequireGroup(primary)
 	if err != nil {
 		return err
@@ -346,6 +350,10 @@ func (a *app) shellChangeGroups(cmd *cobra.Command, client *directory.Client, ad
 		return err
 	}
 
+	if err := a.snapshot(cmd, client); err != nil {
+		return err
+	}
+
 	var failures []error
 	for _, g := range groups {
 		var did bool
@@ -378,6 +386,10 @@ func (a *app) shellResetPassword(cmd *cobra.Command, client *directory.Client) e
 	confirmed, err := confirmAction(fmt.Sprintf("Issue a new password for %s?", user.Username))
 	if err != nil || !confirmed {
 		fmt.Fprintln(os.Stderr, "cancelled")
+		return err
+	}
+
+	if err := a.snapshot(cmd, client); err != nil {
 		return err
 	}
 
@@ -475,6 +487,10 @@ func (a *app) shellCreateGroup(cmd *cobra.Command, client *directory.Client) err
 		}
 	}
 
+	if err := a.snapshot(cmd, client); err != nil {
+		return err
+	}
+
 	group, err := client.CreateGroup(directory.NewGroup{
 		CN:          strings.TrimSpace(name),
 		GIDNumber:   gid,
@@ -561,6 +577,8 @@ func (a *app) shellSwitchProfile() error {
 		a.client = nil
 	}
 	a.profileName = name
+	// A different server needs its own snapshot before the next write.
+	a.backupDone = false
 
 	client, err := a.connect()
 	if err != nil {

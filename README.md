@@ -101,9 +101,44 @@ non-interactively. Real profiles prompt.
 
 ## Configuration
 
-Profiles live in a YAML file, searched in this order when `--config` is absent:
-`$LDAP_CLI_CONFIG`, `./ldap-cli.yaml`, `$XDG_CONFIG_HOME/ldap-cli/config.yaml`,
-`~/.config/ldap-cli/config.yaml`.
+Profiles live in a YAML file, searched in this order when `--config` is absent —
+most specific first, so one admin can override a shared file without editing it
+for everyone:
+
+1. `$LDAP_CLI_CONFIG`
+2. `./ldap-cli.yaml`, `./ldap-cli.yml`
+3. `$XDG_CONFIG_HOME/ldap-cli/config.yaml`
+4. `~/.config/ldap-cli/config.yaml`
+5. `/etc/ldap-cli/config.yaml`
+
+### Where to install it
+
+| Situation | Config | Mode |
+|---|---|---|
+| One admin's workstation | `~/.config/ldap-cli/config.yaml` | `0600` |
+| Shared server, several admins | `/etc/ldap-cli/config.yaml` | `0640`, `root:ldap-admins` |
+| Cron, CI, automation | explicit `--config` or `$LDAP_CLI_CONFIG` | `0640` |
+
+```bash
+sudo install -m 0755 ./bin/ldap-cli /usr/local/bin/ldap-cli
+sudo install -d -m 0750 /etc/ldap-cli
+sudo install -m 0640 examples/config.yaml /etc/ldap-cli/config.yaml
+sudo vi /etc/ldap-cli/config.yaml
+```
+
+The config holds **no passwords**, so it is not secret-critical — but it does
+map out your bind DNs and directory layout, so `0640` rather than world
+readable. Two things do need care:
+
+- **A bind password file**, if you use `--bind-password-file`, is the sensitive
+  one: `0600`, owned by the account that runs the tool.
+- **`backup_dir`** fills with directory dumps containing password hashes. On a
+  server point it somewhere deliberate — `backup_dir: /var/backups/ldap-cli`,
+  mode `0700` — rather than leaving it under a home directory.
+
+For **automation, always pass `--config` or set `$LDAP_CLI_CONFIG`.** The
+working-directory entries are a development convenience, and relying on them
+from cron means the config found depends on where the job happens to start.
 
 See [`examples/config.yaml`](examples/config.yaml) for a documented file. The
 essentials:
@@ -189,6 +224,41 @@ cannot leave a half-provisioned user. A near miss is suggested:
 error: group "devlopers" does not exist under ou=groups,dc=example,dc=org
 (did you mean: developers?); create it first with: ldap-cli group create devlopers
 ```
+
+### Backups
+
+**Before the first write of any run**, the user and group subtrees are dumped to
+an LDIF snapshot. One artifact per run, not per action — an interactive session
+that creates twenty accounts produces one snapshot, taken before the first of
+them.
+
+```
+$ ldap-cli --profile prod user create --given-name John --surname Doe
+backup: /home/you/.local/state/ldap-cli/backups/prod/prod-20260921T210736Z.ldif (131 entries)
+created  uid=jdoe,ou=people,dc=corp,dc=com
+...
+```
+
+- **Location**: `--backup-dir`, then `$LDAP_CLI_BACKUP_DIR`, then `backup_dir`
+  in the config, then `$XDG_STATE_HOME/ldap-cli/backups`. One subdirectory per
+  profile.
+- **Rotation**: the newest 10 per profile are kept, set by `backup_keep`.
+  Rotation only ever touches files matching its own `<profile>-*.ldif` pattern,
+  and one busy profile cannot evict another's history.
+- **Reads never snapshot.** Neither does `--dry-run`, which writes nothing.
+- **If the snapshot fails, the write does not happen.** `--no-backup` is the
+  deliberate override.
+
+The artifact contains `userPassword` hashes, so it is written `0600` in a `0700`
+directory — and `./backups/` is gitignored. Entries are ordered parents-first
+and non-ASCII values are base64-encoded, so it reloads as-is:
+
+```bash
+ldapadd -x -c -D cn=manager,dc=corp,dc=com -W -f <snapshot>.ldif
+```
+
+`-c` continues past entries that still exist, so a snapshot can be used to
+restore just the parts that were lost.
 
 ### ID allocation
 

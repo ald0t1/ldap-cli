@@ -22,9 +22,9 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
-	"strings"
 
 	"github.com/aldo/ldap-cli/internal/config"
+	"github.com/aldo/ldap-cli/internal/ldif"
 	"github.com/aldo/ldap-cli/internal/username"
 )
 
@@ -310,37 +310,16 @@ func writeLDIF(w *bufio.Writer, profile *config.Profile, groups []group, users [
 	}
 }
 
-// writeAttr emits one attribute, base64-encoding when LDIF requires it.
-//
-// The name pools contain non-ASCII surnames on purpose, and RFC 2849 requires
-// any value that is not printable ASCII — or that starts with a character
-// LDIF treats specially — to be written as base64 after a double colon.
+// writeAttr emits one attribute, letting internal/ldif decide whether the
+// value needs base64. The name pools contain non-ASCII surnames on purpose, so
+// this path matters.
 func writeAttr(w *bufio.Writer, name, value string) {
 	if value == "" {
 		return
 	}
-	if needsBase64(value) {
-		fmt.Fprintf(w, "%s:: %s\n", name, base64Encode(value))
+	if ldif.NeedsBase64(value) {
+		fmt.Fprintf(w, "%s:: %s\n", name, base64.StdEncoding.EncodeToString([]byte(value)))
 		return
 	}
 	fmt.Fprintf(w, "%s: %s\n", name, value)
-}
-
-func needsBase64(v string) bool {
-	if strings.HasPrefix(v, " ") || strings.HasPrefix(v, ":") || strings.HasPrefix(v, "<") {
-		return true
-	}
-	if strings.HasSuffix(v, " ") {
-		return true
-	}
-	for i := 0; i < len(v); i++ {
-		if v[i] < 0x20 || v[i] > 0x7e {
-			return true
-		}
-	}
-	return false
-}
-
-func base64Encode(v string) string {
-	return base64.StdEncoding.EncodeToString([]byte(v))
 }

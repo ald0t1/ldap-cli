@@ -58,6 +58,39 @@ func TestLoadExampleConfig(t *testing.T) {
 	}
 }
 
+func TestDefaultPathsPrecedence(t *testing.T) {
+	t.Setenv("LDAP_CLI_CONFIG", "/explicit/from-env.yaml")
+	t.Setenv("XDG_CONFIG_HOME", "/xdg")
+
+	got := DefaultPaths()
+
+	// The env override must be consulted first and the machine-wide file last,
+	// so a single admin can override a shared profile set.
+	if got[0] != "/explicit/from-env.yaml" {
+		t.Errorf("first path = %q, want the env override", got[0])
+	}
+	if last := got[len(got)-1]; last != SystemPath {
+		t.Errorf("last path = %q, want %q", last, SystemPath)
+	}
+
+	indexOf := func(want string) int {
+		for i, p := range got {
+			if p == want {
+				return i
+			}
+		}
+		return -1
+	}
+	cwd := indexOf("ldap-cli.yaml")
+	xdg := indexOf("/xdg/ldap-cli/config.yaml")
+	if cwd < 0 || xdg < 0 {
+		t.Fatalf("expected both the cwd and XDG paths, got %v", got)
+	}
+	if !(cwd < xdg && xdg < len(got)-1) {
+		t.Errorf("expected cwd < xdg < system ordering, got %v", got)
+	}
+}
+
 func TestLoadRejectsUnknownFields(t *testing.T) {
 	// A typo'd key is a silent misconfiguration otherwise.
 	body := strings.Replace(minimal, "bind_dn:", "bnid_dn:", 1)

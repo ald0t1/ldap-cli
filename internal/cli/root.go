@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/aldo/ldap-cli/internal/backup"
 	"github.com/aldo/ldap-cli/internal/config"
 	"github.com/aldo/ldap-cli/internal/directory"
 	"github.com/aldo/ldap-cli/internal/mailer"
@@ -18,16 +19,26 @@ import (
 // bindPasswordEnv lets scripts and the compose dev server skip the prompt.
 const bindPasswordEnv = "LDAP_CLI_BIND_PASSWORD"
 
+// backupDirEnv overrides where pre-write snapshots are written.
+const backupDirEnv = "LDAP_CLI_BACKUP_DIR"
+
 // app holds the global flags and the lazily-built connection.
 type app struct {
 	configPath       string
 	profileName      string
 	bindPasswordFile string
 	jsonOut          bool
+	backupDir        string
+	noBackup         bool
 
 	cfg    *config.Config
 	client *directory.Client
 	mail   mailer.Mailer
+
+	// backupDone keeps a run to a single snapshot. The interactive shell
+	// performs many writes in one process, and one artifact per session is
+	// the useful granularity — not one per action.
+	backupDone bool
 }
 
 // Execute runs the CLI, returning the process exit code.
@@ -61,6 +72,8 @@ func Execute() int {
 	pf.StringVarP(&a.profileName, "profile", "p", "", "profile to use (default: the config's default_profile)")
 	pf.StringVar(&a.bindPasswordFile, "bind-password-file", "", "read the manager bind password from this file instead of prompting")
 	pf.BoolVar(&a.jsonOut, "json", false, "emit machine-readable JSON")
+	pf.StringVar(&a.backupDir, "backup-dir", "", "where to write pre-write snapshots (default: $"+backupDirEnv+", backup_dir, then "+backup.DefaultDir()+")")
+	pf.BoolVar(&a.noBackup, "no-backup", false, "skip the snapshot taken before the first write")
 
 	root.AddCommand(
 		a.shellCmd(),
@@ -127,6 +140,71 @@ func (a *app) connect() (*directory.Client, error) {
 	}
 	a.client = client
 	return client, nil
+}
+
+// connectForWrite binds and, on the first write of the run, captures a
+// snapshot of the subtrees about to change.
+//
+// Every mutating command goes through here rather than connect(), so a new
+// write command cannot forget the backup. Read-only commands deliberately do
+// not snapshot.
+func (a *app) connectForWrite(cmd *cobra.Command) (*directory.Client, error) {
+	client, err := a.connect()
+	if err != nil {
+		return nil, err
+	}
+	if err := a.snapshot(cmd, client); err != nil {
+		return nil, err
+	}
+	return client, nil
+}
+
+// snapshot writes one pre-write backup per run and rotates old ones.
+func (a *app) snapshot(cmd *cobra.Command, client *directory.Client) error {
+	if a.noBackup || a.backupDone {
+		return nil
+	}
+
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return err
+	}
+
+	dir := a.backupDir
+	if dir == "" {
+		dir = os.Getenv(backupDirEnv)
+	}
+	if dir == "" {
+		dir = cfg.BackupDir
+	}
+	if dir == "" {
+		dir = backup.DefaultDir()
+	}
+
+	res, err := backup.Take(client.Conn, backup.Options{
+		Dir:     dir,
+		Profile: client.Profile.Name,
+		BaseDNs: []string{client.Profile.UserBaseDN, client.Profile.GroupBaseDN},
+		Keep:    cfg.BackupKeep,
+	})
+	if err != nil {
+		// Refusing to proceed is the point: the operator asked for a backup
+		// before every run, so a write without one is not what they wanted.
+		// --no-backup is the deliberate override.
+		return fmt.Errorf("%w\n(pass --no-backup to write without a snapshot)", err)
+	}
+
+	// Mark it done even on the JSON path, so a failure cannot cause a second
+	// attempt mid-run.
+	a.backupDone = true
+
+	if !a.jsonOut {
+		fmt.Fprintf(os.Stderr, "backup: %s (%d entries)\n", res.Path, res.Entries)
+		if n := len(res.Removed); n > 0 {
+			fmt.Fprintf(os.Stderr, "backup: rotated %d older snapshot(s)\n", n)
+		}
+	}
+	return nil
 }
 
 // bindPassword obtains the manager password: environment, then file, then an

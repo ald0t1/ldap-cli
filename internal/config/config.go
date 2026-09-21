@@ -71,6 +71,13 @@ type Config struct {
 	DefaultProfile string              `yaml:"default_profile"`
 	Profiles       map[string]*Profile `yaml:"profiles"`
 
+	// BackupDir is where pre-write snapshots are stored, one subdirectory per
+	// profile. Empty means backup.DefaultDir().
+	BackupDir string `yaml:"backup_dir"`
+
+	// BackupKeep is how many snapshots to retain per profile.
+	BackupKeep int `yaml:"backup_keep"`
+
 	// Path records where this config was read from, for error messages.
 	Path string `yaml:"-"`
 }
@@ -110,7 +117,16 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// SystemPath is the system-wide config location, used when a machine's admins
+// share one set of profiles.
+const SystemPath = "/etc/ldap-cli/config.yaml"
+
 // DefaultPaths lists, in order, where Load looks when given no explicit path.
+//
+// Most specific wins: an explicit environment variable, then the working
+// directory, then the invoking user's config, and only then the machine-wide
+// file. That ordering lets one admin override a shared profile set without
+// editing it for everyone.
 func DefaultPaths() []string {
 	var paths []string
 	if env := os.Getenv("LDAP_CLI_CONFIG"); env != "" {
@@ -123,6 +139,7 @@ func DefaultPaths() []string {
 	if home, err := os.UserHomeDir(); err == nil {
 		paths = append(paths, filepath.Join(home, ".config", "ldap-cli", "config.yaml"))
 	}
+	paths = append(paths, SystemPath)
 	return paths
 }
 
@@ -173,6 +190,10 @@ func (c *Config) Validate() error {
 			problems = append(problems, fmt.Sprintf("default_profile %q is not a defined profile (have: %s)",
 				c.DefaultProfile, strings.Join(c.ProfileNames(), ", ")))
 		}
+	}
+
+	if c.BackupKeep < 0 {
+		problems = append(problems, "backup_keep cannot be negative")
 	}
 
 	for _, name := range c.ProfileNames() {
