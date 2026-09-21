@@ -1,0 +1,31 @@
+# Bootstrap tree for the compose dev server.
+#
+# Deliberately minimal: the containers that ldap-cli writes into, plus one
+# primary group to assign new users to. Everything else is created by the tool,
+# which is what the end-to-end walkthrough exercises.
+
+dn: dc=example,dc=org
+objectClass: dcObject
+objectClass: organization
+dc: example
+o: Example Org
+
+dn: ou=people,dc=example,dc=org
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=groups,dc=example,dc=org
+objectClass: organizationalUnit
+ou: groups
+
+dn: ou=system,dc=example,dc=org
+objectClass: organizationalUnit
+ou: system
+
+# Default primary group, referenced by default_primary_group in the dev profile.
+dn: cn=users,ou=groups,dc=example,dc=org
+objectClass: top
+objectClass: posixGroup
+cn: users
+gidNumber: 20000
+description: Default primary group for new accounts

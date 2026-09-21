@@ -1,0 +1,70 @@
+# ldap-cli configuration.
+#
+# Searched, in order, when --config is not given:
+#   $LDAP_CLI_CONFIG
+#   ./ldap-cli.yaml, ./ldap-cli.yml
+#   $XDG_CONFIG_HOME/ldap-cli/config.yaml
+#   ~/.config/ldap-cli/config.yaml
+#
+# The manager bind password is never stored here. It comes from
+# $LDAP_CLI_BIND_PASSWORD, --bind-password-file, or an interactive prompt.
+
+default_profile: dev
+
+profiles:
+  # A production server: TLS on the wire, verified against a private CA.
+  prod:
+    url: ldaps://ldap.corp.com:636
+    ca_cert: /etc/ssl/corp-ca.pem
+    insecure_skip_verify: false
+    # Leave false so the tool refuses to send the bind password in the clear.
+    allow_insecure_bind: false
+
+    bind_dn: cn=manager,dc=corp,dc=com
+    user_base_dn: ou=people,dc=corp,dc=com
+    group_base_dn: ou=groups,dc=corp,dc=com
+
+    user_rdn_attr: uid
+    default_primary_group: users
+    login_shell: /bin/bash
+    home_template: /home/{{.Username}}
+    # Used to default --email to <username>@<mail_domain>.
+    mail_domain: corp.com
+    extra_user_object_classes: []
+    username_max_length: 32
+    password_length: 16
+
+    uid:
+      min: 10000
+      max: 60000
+      # Optional. When set, this entry holds the next-id counter and is claimed
+      # atomically. The directory is scanned either way and the scan acts as a
+      # floor, so a stale counter can never reissue a live id.
+      next_dn: cn=uidNext,ou=system,dc=corp,dc=com
+      next_attr: uidNumber
+    gid:
+      min: 20000
+      max: 60000
+      next_dn: cn=gidNext,ou=system,dc=corp,dc=com
+      next_attr: gidNumber
+
+  # The throwaway server from compose.yaml. The host is the compose service
+  # name, because the CLI runs in a sibling container. No counter entries here,
+  # so ids come purely from scanning the directory.
+  dev:
+    url: ldap://ldap:1389
+    start_tls: false
+    allow_insecure_bind: true
+
+    bind_dn: cn=admin,dc=example,dc=org
+    user_base_dn: ou=people,dc=example,dc=org
+    group_base_dn: ou=groups,dc=example,dc=org
+
+    default_primary_group: users
+    mail_domain: example.org
+    uid:
+      min: 10000
+      max: 60000
+    gid:
+      min: 20000
+      max: 60000

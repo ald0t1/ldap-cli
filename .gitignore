@@ -1,0 +1,5 @@
+# Build output from `podman compose run --rm build`.
+/bin/
+
+# Scratch configs used when testing profiles.
+/.tmp-*.yaml

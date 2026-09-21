@@ -1,0 +1,152 @@
+# Everything — build, unit tests, and running the CLI — goes through podman
+# compose, so no Go toolchain is needed on the host.
+#
+#   podman compose run --rm test              # unit tests
+#   podman compose run --rm build             # compile
+#   podman compose run --rm vet               # go vet
+#   podman compose run --rm cli profile list  # run the CLI against the dev server
+#   podman compose up -d ldapadmin            # browse the tree at localhost:8080
+#
+# See README.md for the full walkthrough.
+
+name: ldap-cli
+
+# Shared Go container setup. The module and build caches live in named volumes
+# so repeated runs do not re-download or recompile the world.
+x-go: &go
+  image: docker.io/library/golang:1.25-bookworm
+  working_dir: /src
+  volumes:
+    - .:/src:z
+    - gomodcache:/go/pkg/mod
+    - gobuildcache:/root/.cache/go-build
+  environment:
+    # Pin to the image's toolchain rather than downloading whatever go.mod asks
+    # for, so a bumped go directive fails loudly instead of silently fetching.
+    GOTOOLCHAIN: local
+    GOFLAGS: -buildvcs=false
+
+services:
+  # OpenLDAP for end-to-end work. bitnamilegacy is the arm64-capable home of
+  # the old bitnami/openldap image after Bitnami moved its catalogue.
+  ldap:
+    image: docker.io/bitnamilegacy/openldap:2.6
+    environment:
+      LDAP_ROOT: dc=example,dc=org
+      LDAP_ADMIN_USERNAME: admin
+      LDAP_ADMIN_PASSWORD: adminpassword
+      LDAP_PORT_NUMBER: "1389"
+      # Load our own tree instead of Bitnami's sample users, so the directory
+      # starts with ou=people, ou=groups and one primary group and nothing else.
+      LDAP_SKIP_DEFAULT_TREE: "yes"
+      LDAP_CUSTOM_LDIF_DIR: /ldifs
+    volumes:
+      - ./examples/ldifs:/ldifs:ro,z
+    ports:
+      # Published only so a host ldapsearch can peek in; the CLI reaches the
+      # server over the compose network as ldap:1389.
+      - "1389:1389"
+    healthcheck:
+      test:
+        - CMD
+        - ldapsearch
+        - -x
+        - -H
+        - ldap://localhost:1389
+        - -D
+        - cn=admin,dc=example,dc=org
+        - -w
+        - adminpassword
+        - -b
+        - dc=example,dc=org
+        - -s
+        - base
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
+  # phpLDAPadmin, for eyeballing the tree in a browser at http://localhost:8080
+  #
+  #   podman compose up -d ldapadmin
+  #
+  # It opens straight into the tree as a guest — no login needed to look around.
+  # To make changes, log in with:
+  #   cn=admin,dc=example,dc=org  /  adminpassword
+  #
+  # This is a viewer for the dev server only. It is not part of the build or
+  # test path, so nothing in the test suite depends on it being up.
+  ldapadmin:
+    image: docker.io/leenooks/phpldapadmin:2.0-dev
+    environment:
+      LDAP_HOST: ldap
+      LDAP_PORT: "1389"
+      LDAP_BASE_DN: dc=example,dc=org
+      LDAP_USERNAME: cn=admin,dc=example,dc=org
+      LDAP_PASSWORD: adminpassword
+      # Browse without logging in at all. Fine here: this only ever points at
+      # the throwaway dev directory.
+      LDAP_ALLOW_GUEST: "true"
+      # Log in by full DN. The default is uid, which would reject
+      # cn=admin,dc=example,dc=org since the admin is not a posixAccount.
+      LDAP_LOGIN_ATTR: dn
+      APP_URL: http://localhost:8080
+      # Laravel refuses to boot without a key. Throwaway, for this local dev
+      # UI only — it protects nothing but this container's session cookies.
+      APP_KEY: base64:BxdMQMLn6fPrwVReWmushj4A463a3FDWw2tqabunr80=
+    ports:
+      - "8080:8080"
+    depends_on:
+      ldap:
+        condition: service_healthy
+
+  # Unit tests. No LDAP server needed: the directory layer is exercised
+  # through a fake, which is the point of the Directory interface.
+  test:
+    <<: *go
+    entrypoint: [go, test]
+    command: [./...]
+
+  build:
+    <<: *go
+    entrypoint: [go, build]
+    command: [-o, /src/bin/ldap-cli, .]
+
+  vet:
+    <<: *go
+    entrypoint: [go, vet]
+    command: [./...]
+
+  # Arbitrary toolchain commands: podman compose run --rm go mod tidy
+  go:
+    <<: *go
+    entrypoint: [go]
+    command: [version]
+
+  # The CLI itself, pointed at the dev server.
+  #
+  #   podman compose run --rm cli                    # interactive menu
+  #   podman compose run --rm cli user create --...   # one-shot, for scripting
+  #
+  # No arguments starts the menu, so command is empty rather than unset (an
+  # unset command would fall through to the golang image's own CMD).
+  cli:
+    <<: *go
+    entrypoint: [go, run, .]
+    command: []
+    environment:
+      GOTOOLCHAIN: local
+      GOFLAGS: -buildvcs=false
+      # huh needs a sane terminal type to render the menus.
+      TERM: xterm-256color
+      LDAP_CLI_CONFIG: /src/examples/config.yaml
+      # Non-interactive convenience for the throwaway dev server only. Real
+      # profiles prompt for this.
+      LDAP_CLI_BIND_PASSWORD: adminpassword
+    depends_on:
+      ldap:
+        condition: service_healthy
+
+volumes:
+  gomodcache:
+  gobuildcache:
